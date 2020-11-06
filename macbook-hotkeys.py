@@ -4,8 +4,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from evdev import InputDevice, KeyEvent, ecodes
+import evdev
+import glob
 import os
+import select
 
 class Backlight(object):
     def __init__(self, dirname):
@@ -36,22 +38,35 @@ class Backlight(object):
     def decrease_brightness(self, delta):
         self.increase_brightness(-delta)
 
-screen = Backlight('/sys/class/backlight/intel_backlight')
-keyboard = Backlight('/sys/class/leds/smc::kbd_backlight')
+if __name__ == '__main__':
+    screen = Backlight('/sys/class/backlight/intel_backlight')
+    keyboard = Backlight('/sys/class/leds/smc::kbd_backlight')
 
-screen_delta = 10
-keyboard_delta = 10
+    screen_delta = 20
+    keyboard_delta = 10
 
-dev = InputDevice('/dev/input/event0')
+    devs = [
+        evdev.InputDevice(filename)
+        for filename in glob.glob('/dev/input/event*')
+    ]
 
-for event in dev.read_loop():
-    if event.type == ecodes.EV_KEY:
-        if event.value in [KeyEvent.key_up, KeyEvent.key_hold]:
-            if event.code == ecodes.KEY_BRIGHTNESSDOWN:
-                screen.decrease_brightness(screen_delta)
-            if event.code == ecodes.KEY_BRIGHTNESSUP:
-                screen.increase_brightness(screen_delta)
-            if event.code == ecodes.KEY_KBDILLUMDOWN:
-                keyboard.decrease_brightness(keyboard_delta)
-            if event.code == ecodes.KEY_KBDILLUMUP:
-                keyboard.increase_brightness(keyboard_delta)
+    poller = select.poll()
+    for dev in devs:
+        poller.register(dev, select.POLLIN)
+
+    fileno_to_dev = {dev.fileno(): dev for dev in devs}
+
+    while True:
+        for fileno, status in poller.poll():
+            dev = fileno_to_dev[fileno]
+            event = dev.read_one()
+            if event.type == evdev.ecodes.EV_KEY:
+                if event.value in [evdev.KeyEvent.key_up, evdev.KeyEvent.key_hold]:
+                    if event.code == evdev.ecodes.KEY_BRIGHTNESSDOWN:
+                        screen.decrease_brightness(screen_delta)
+                    if event.code == evdev.ecodes.KEY_BRIGHTNESSUP:
+                        screen.increase_brightness(screen_delta)
+                    if event.code == evdev.ecodes.KEY_KBDILLUMDOWN:
+                        keyboard.decrease_brightness(keyboard_delta)
+                    if event.code == evdev.ecodes.KEY_KBDILLUMUP:
+                        keyboard.increase_brightness(keyboard_delta)
